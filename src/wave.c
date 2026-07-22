@@ -187,54 +187,84 @@ wav_t* wav_mix(wav_t* sound1, wav_t* sound2){
     return mix_sound;
 }
 
-
 wav_t* wav_mix_array(wav_t** sounds, int n){
     if (!sounds) return NULL;
+    wav_t* first_sound = NULL;
+    int valid_sound = 0;
+
+    for(int i = n - 1; i >= 0; i--){
+        if(sounds[i] != NULL) {
+            first_sound = sounds[i];
+            valid_sound++;
+        }
+    }
+
+    if(valid_sound == 0) return NULL;
+    if(valid_sound == 1) return wav_copy(first_sound);
+
     for(int i = 0; i < n; i++){
-        if (sounds[i]->header.sample_rate != sounds[i + 1]->header.sample_rate) {
-            printf("Erro [wav_mix]: Taxas de amostragem incompatíveis (%u Hz vs %u Hz).\n", 
-                sounds[i]->header.sample_rate, sounds[i + 1]->header.sample_rate);
+        if(!sounds[i] || !sounds[i]->data) continue;
+
+        if (sounds[i]->header.sample_rate != first_sound->header.sample_rate) {
+            printf("Erro [wav_mix]: Taxas de amostragem incompatíveis (%u Hz vs %u Hz).\n",
+                sounds[i]->header.sample_rate, first_sound->header.sample_rate);
             return NULL;
         }
-        if (sounds[i]->header.num_channels != sounds[i + 1]->header.num_channels) {
-            printf("Erro [wav_mix]: Número de canais incompatível (%d ch vs %d ch).\n", 
-                sounds[i]->header.num_channels, sounds[i + 1]->header.num_channels);
+        if (sounds[i]->header.num_channels != first_sound->header.num_channels) {
+            printf("Erro [wav_mix]: Número de canais incompatível (%d ch vs %d ch).\n",
+                sounds[i]->header.num_channels,first_sound->header.num_channels);
             return NULL;
         }
-        if (sounds[i]->header.bits_per_sample != sounds[i + 1]->header.bits_per_sample) {
-            printf("Erro [wav_mix]: bits por amostra incompatíveis (%d bits vs %d bits).\n", 
-                sounds[i]->header.bits_per_sample, sounds[i + 1]->header.bits_per_sample);
+        if (sounds[i]->header.bits_per_sample != first_sound->header.bits_per_sample) {
+            printf("Erro [wav_mix]: bits por amostra incompatíveis (%d bits vs %d bits).\n",
+                sounds[i]->header.bits_per_sample, first_sound->header.bits_per_sample);
             return NULL;
         }
     }
-    wav_t* greater_sound = sound1->num_samples > sound2->num_samples ? sound1 : sound2;
-    wav_t* less_sound = sound1->num_samples < sound2->num_samples ? sound1 : sound2;
+    wav_t* greater_sound = first_sound;
+    for(int i = 0; i < n; i++){
+        if(!sounds[i] || !sounds[i]->data) continue;
+
+        if(sounds[i]->num_samples > greater_sound->num_samples)
+            greater_sound = sounds[i];
+    }
     wav_t* mix_sound = wav_copy(greater_sound);
 
-    short* samples1 = sound1->data, *samples2 = sound2->data;
-    
-    short max1 = abs(samples1[0]), max2 = abs(samples2[0]);
-    for(int i = 1; i < sound1->num_samples; i++)
-        if(abs(samples1[i]) > max1) max1 = abs(samples1[i]);
-    for(int i = 0; i < sound2->num_samples; i++)
-        if(abs(samples2[i]) > max2) max2 = abs(samples2[i]);
-        
-    float factor = 1.0f;
-    if(max1 + max2 > MAX_AMPLITUDE_16BIT*0.8f)
-        factor = (MAX_AMPLITUDE_16BIT*0.8f) / (max1 + max2);
-
-    for(int i = 0; i < less_sound->num_samples; i++){
-        int mixed_int = (int)((samples1[i] + samples2[i]) * factor);
-        ((short*)mix_sound->data)[i] = (short)mixed_int;
+    short* samples[n];
+    for(int i = 0; i < n; i++){
+        samples[i] = !sounds[i] ? NULL : sounds[i]->data;
     }
 
-    for(int i = less_sound->num_samples; i < greater_sound->num_samples; i++){
-        ((short*)mix_sound->data)[i] *= factor;
+    int sum_max = 0;
+    for(int i = 0; i < n; i++){
+        if(!sounds[i] || !sounds[i]->data) continue;
+        short max = abs(*samples[i]);
+        for(int j = 1; j < sounds[i]->num_samples; j++){
+            if(abs(samples[i][j]) > max) max = abs(samples[i][j]);
+        }
+        sum_max += max;
+    }
+
+    float factor = 1.0f;
+
+    if(sum_max > MAX_AMPLITUDE_16BIT * 0.8f){
+        factor = MAX_AMPLITUDE_16BIT*0.8f / (float)sum_max;
+    }
+
+    for(int i = 0; i < mix_sound->num_samples; i++){
+        int sum = 0;
+        for(int j = 0; j < n; j++){
+            if(!sounds[j] || !sounds[j]->data) continue;
+            if(i < sounds[j]->num_samples){
+                sum += samples[j][i];
+            }
+        }
+        ((short*)mix_sound->data)[i] = (short)(sum * factor);
     }
 
     return mix_sound;
-
 }
+
 
 wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, const char* file_name){
     unsigned rate = 44100;
