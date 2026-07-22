@@ -337,11 +337,66 @@ wav_t* wav_tremble(wav_t* sound, float k){
 }
 
 wav_t* wav_to_mono(wav_t* sound){
+    if(!sound || !sound->data) return NULL;
+    if(sound->header.num_channels == 1) return wav_copy(sound);
 
+    WavHeader h = STD_HEADER(sound->header.sample_rate, 1, sound->num_samples / sound->header.num_channels);
+    wav_t* mono_sound = wav_new(h);
+    short num_channels = sound->header.num_channels;
+
+    for(int i = 0; i < mono_sound->num_samples; i++){
+        int mean = 0;
+        for(int c = 0; c < num_channels; c++){
+            int idx = i * num_channels + c;
+            mean += ((short*)sound->data)[idx];
+        }
+        mean /= num_channels;
+        ((short*) mono_sound->data)[i] = (short) mean;
+    }
+    return mono_sound;
 }
 
 wav_t* wav_gaussian_blur(wav_t* sound, float sigma, int kernel_size){
+    if(kernel_size % 2 == 0 || kernel_size <= 0 || !sound || sigma <= 0) return wav_copy(sound);
+    float* kernel = malloc(sizeof(float) * kernel_size);
+    int radius = kernel_size / 2;
 
+    float sum_weavys = 0.0f;
+    for(int i = -radius; i <= radius; i++){
+        float dist = -(float)(i*i) / (2.0f * sigma * sigma);
+        kernel[i + radius] = expf(dist);
+        sum_weavys += kernel[i + radius];
+    }
+
+    for(int i = 0; i < kernel_size; i++){
+        kernel[i] /= sum_weavys;
+    }
+
+    wav_t* blurred_sound = wav_copy(sound);
+    short* samples_blurred = blurred_sound->data;
+    float* samples_float = calloc(sound->num_samples, sizeof(float));
+
+    short num_channels = sound->header.num_channels;
+    for(int c = 0; c < num_channels; c++){
+        for(int f = radius; f < sound->num_frames - radius; f++){
+            for(int j = -radius; j <= radius; j++){
+                samples_float[f*num_channels + c] += ((short*) sound->data)[(f + j)*num_channels + c] * kernel[j + radius];
+            }
+        }
+    }
+    
+    for(int i = radius*num_channels; i < sound->num_samples - radius*num_channels; i++){
+        samples_blurred[i] = (short)(samples_float[i]);
+    }
+
+    for(int i = 0; i < radius*num_channels; i++){
+        samples_blurred[i] = ((short*)sound->data)[i];
+        samples_blurred[sound->num_samples - i - 1] = ((short*)sound->data)[sound->num_samples - i - 1];
+    }
+
+    free(samples_float);
+    free(kernel);
+    return blurred_sound;
 }
 
 wav_t* wav_decrease_sample_rate(wav_t* sound, unsigned new_sample_rate){
