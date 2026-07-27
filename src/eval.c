@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include "eval.h"
+#include <complex.h>
 
 #define _USE_MATH_DEFINES
 signed char var = 'x';

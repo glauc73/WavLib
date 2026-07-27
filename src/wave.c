@@ -1,10 +1,12 @@
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <complex.h>
 #include "../include/eval.h"
+#include "../include/fft.h"
 
 #define MAX_AMPLITUDE_16BIT (short)0x7fff
 #define MIN_AMPLITUDE_16BIT (short)0x8000
@@ -271,8 +273,8 @@ wav_t* wav_mix_array(wav_t** sounds, int n){
 }
 
 
-wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, const char* file_name){
-    unsigned rate = 44100;
+wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, unsigned sample_rate, const char* file_name){
+    unsigned rate = sample_rate;
     unsigned num_samples = time_duration * rate;
     wav_t* sound = wav_new(STD_HEADER(rate, 1, num_samples));
     int T = sound->header.sample_rate/freq;
@@ -294,7 +296,8 @@ wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq,
     }
 
     for(int i = 0; i < num_samples; i++){
-        ((short*)sound->data)[i] = (short) ((samples[i % T] / max)*(MAX_AMPLITUDE_16BIT * 0.95f)); 
+        int val =((samples[i % T] / max)*(MAX_AMPLITUDE_16BIT * 0.95f));
+        ((short*)sound->data)[i] = (short)round(val); 
     }
 
     if(file_name && *file_name) wav_write(sound, file_name);
@@ -370,7 +373,7 @@ wav_t* wav_to_mono(wav_t* sound){
     if(!sound || !sound->data) return NULL;
     if(sound->header.num_channels == 1) return wav_copy(sound);
 
-    WavHeader h = STD_HEADER(sound->header.sample_rate, 1, sound->num_samples / sound->header.num_channels);
+    WavHeader h = STD_HEADER(sound->header.sample_rate, 1, sound->num_frames);
     wav_t* mono_sound = wav_new(h);
     short num_channels = sound->header.num_channels;
 
@@ -526,10 +529,32 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 
 int main(){
 
-    wav_t* wv = wav_read("tracks/vaqueiro_nao.wav");
-    unsigned new_fc = 15000; 
-    wav_t* wv_high = wav_highpass_filter(wv, new_fc);
+    uint64_t n = 32768;
+    wav_t* la = wav_synthesize("sin(2*pi*440*t)", 0, 32768.0f/28160.0f, 440,28160.0f, NULL);
+    double* f = malloc(n * sizeof(double));
+    
+    for(int i = 0; i < n; i++){
+        f[i] = ((short*)la->data)[i] /(float) MAX_AMPLITUDE_16BIT;
+    }
+    for(int i = 0; i < 600; i++){
+        printf("f[%d] = %lf,\t", i, f[i]);
+    }
+    double complex* F = fft(f, &n);
 
-    wav_write(wv_high, "tracks/vaqueiro_nao_high.wav");
+    int max = 0, max2 = 0, max3 = 0;
+    for(int i = 0; i < n; i++){
+        if(cabs(F[i]) > cabs(F[max])) max = i;
+    }
+    for(int i = 0; i < n; i++){
+        if(i == max) continue;
+        if(cabs(F[i]) > cabs(F[max2])) max2 = i;
+    }
+    for(int i = 0; i < n; i++){
+        if(i == max || i == max2) continue;
+        if(cabs(F[i]) > cabs(F[max3])) max3 = i;
+    }
+    printf("max(%d): %lf", max, cabs(F[max]));
+    printf("max2(%d): %lf", max2, cabs(F[max2]));
+    printf("max2(%d): %lf", max2, cabs(F[max2]));
     return 0;
 }
