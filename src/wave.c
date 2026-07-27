@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,7 +43,7 @@ typedef struct {
     .block_align    = (channels) * sizeof(short), \
     .bits_per_sample= 16, \
     .subchunk2_id   = {'d', 'a', 't', 'a'}, \
-    .subchunk2_size = (num_samples) * (channels) * sizeof(short) \
+    .subchunk2_size = (num_samples) * sizeof(short) \
 })
 
 typedef struct {
@@ -427,38 +428,76 @@ wav_t* wav_gaussian_blur(wav_t* sound, float sigma, int kernel_size){
     free(kernel);
     return blurred_sound;
 }
-
-wav_t* wav_low_pass_filter(wav_t* sound, float fc){
-    float fs = (float) sound->header.sample_rate;
-    float sigma = 0.1325051817 * fs/fc; // sqrt(ln2) / 2pi = 0.1325051817
     
-    int radius = (int) ceilf(3 * sigma);
-    float kernel_size = 2*radius + 1;
+wav_t* wav_bandpass_filter(wav_t* sound, float fA, float fB){
+    if(!sound) return NULL;
+    float fs = (float) sound->header.sample_rate;
+    float f0 = (fA + fB) / 2.0f;
+    float fc = fA;
+    float sigma_f = fabsf(fc - f0) / sqrt(log(2));
+    float sigma_t = 1.0f/(2.0f * M_PI * sigma_f);
+    float sigma_n =  sigma_t * fs; // sqrt(ln2) / 2pi
+    int kernel_size = 2 * ceilf(3*sigma_n) + 1;
 
-    wav_t* new = wav_gaussian_blur(sound, sigma, kernel_size);
-    return new;
+    float *kernel = malloc(kernel_size * sizeof(float));
+    int radius = kernel_size / 2;
+
+    for(int i = -radius; i <= radius; i++){
+        kernel[i + radius] = sigma_f*sqrt(2*M_PI) * expf(-i*i/(2*sigma_n*sigma_n)) * cosf(2*M_PI*f0*i / fs);
+    }
+    
+    float* samples_float = calloc(sound->num_samples, sizeof(float));
+
+    wav_t* filtered_sound = wav_copy(sound);
+    short* samples = filtered_sound->data;
+    short num_channels = sound->header.num_channels;
+    for(int c = 0; c < num_channels; c++){
+        for(int f = radius; f < sound->num_frames - radius; f++){
+            for(int k = -radius; k <= radius; k++){
+                
+                samples_float[f*num_channels + c] += samples[(f + k)*num_channels + c] * kernel[radius + k];
+            }
+        }
+    }
+
+    for(int i = 0; i < sound->num_samples; i++){
+        float filtered_sample = samples_float[i];
+        if(filtered_sample > MAX_AMPLITUDE_16BIT) filtered_sample = 0.95f * MAX_AMPLITUDE_16BIT;
+        if(filtered_sample < MIN_AMPLITUDE_16BIT) filtered_sample = 0.95f * MIN_AMPLITUDE_16BIT;
+
+        samples[i] = (short)filtered_sample;
+    } 
+
+    free(kernel);
+    free(samples_float);
+    return filtered_sound;
 }
 
-wav_t* wav_high_pass_filter(wav_t* sound, float fc){
-    wav_t* new = wav_low_pass_filter(sound, fc);
-
-    short* samples = sound->data, *low = new->data;
-    
-    int max = 0;
-    for(int i = 1; i < new->num_samples; i++){
-        if(samples[i] - low[i] > max && max > 0) max = low[i] - samples[i];
+wav_t* wav_band_reject_filter(wav_t* sound, float fA, float fB){
+    wav_t* filtered = wav_bandpass_filter(sound, fA, fB);
+    short *samples = sound->data, *filtered_samples = filtered->data;
+    int max_dif = 0;
+    for(int i = 0; i < sound->num_samples; i++){
+        int dif = (samples[i] - filtered_samples[i]);
+        if(abs(dif) > max_dif) max_dif = abs(dif);
     }
-
     float factor = 1.0f;
-    if(max > MAX_AMPLITUDE_16BIT*0.95f)
-        factor = (MAX_AMPLITUDE_16BIT*0.95f) / max;
+    if(max_dif > MAX_AMPLITUDE_16BIT && max_dif > 0) factor = 0.95f*MAX_AMPLITUDE_16BIT / (float)max_dif; 
 
-    for(int i = 0; i < new->num_samples; i++){
-        int mixed_int = (int)( (samples[i] - low[i]) * factor);
-        low[i] = (short)mixed_int;
+    for(int i = 0; i < sound->num_samples; i++){
+        int dif = (samples[i] - filtered_samples[i]);
+        filtered_samples[i] = (short)(dif*factor);
     }
-    
-    return new;
+
+    return filtered;
+}
+
+wav_t* wav_lowpass_filter(wav_t* sound, float fc){
+    return wav_bandpass_filter(sound, 0, fc);
+}
+
+wav_t* wav_highpass_filter(wav_t* sound, float fc){
+    return wav_band_reject_filter(sound, 0, fc);
 }
 
 wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate){
@@ -488,10 +527,9 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 int main(){
 
     wav_t* wv = wav_read("tracks/vaqueiro_nao.wav");
-    wav_t* wv2 = wav_read("tracks/tambor.wav");
+    unsigned new_fc = 15000; 
+    wav_t* wv_high = wav_highpass_filter(wv, new_fc);
 
-    wav_t* mix = wav_mix(wv, wv2);
-
-    wav_write(mix, "tracks/vaqueiro_nao_tambor.wav");
+    wav_write(wv_high, "tracks/vaqueiro_nao_high.wav");
     return 0;
 }
