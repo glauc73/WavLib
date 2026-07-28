@@ -452,8 +452,10 @@ wav_t* wav_gaussian_blur(wav_t* sound, float sigma, int kernel_size){
 wav_t* wav_bandpass_filter(wav_t* sound, float fA, float fB){
     if(!sound) return NULL;
     float fs = (float) sound->header.sample_rate;
-    float f0 = (fA + fB) / 2.0f;
-    float fc = fA;
+    float f0 = 0.0f;
+    if(fA != 0.0f) f0 = (fA + fB) / 2.0f;
+    float fc = fB;
+
     float sigma_f = fabsf(fc - f0) / sqrt(log(2));
     float sigma_t = 1.0f/(2.0f * M_PI * sigma_f);
     float sigma_n =  sigma_t * fs; // sqrt(ln2) / 2pi
@@ -462,10 +464,16 @@ wav_t* wav_bandpass_filter(wav_t* sound, float fA, float fB){
     float *kernel = malloc(kernel_size * sizeof(float));
     int radius = kernel_size / 2;
 
+    float sum_kernel = 0.0f;
     for(int i = -radius; i <= radius; i++){
         kernel[i + radius] = sigma_f*sqrt(2*M_PI) * expf(-i*i/(2*sigma_n*sigma_n)) * cosf(2*M_PI*f0*i / fs);
+        sum_kernel += kernel[i + radius];
     }
-    
+
+    float norm = f0 == 0.0f ? sum_kernel : sum_kernel / 2.0f;
+    if(sum_kernel != 0.0f) 
+        for(int i = 0; i < kernel_size; i++) kernel[i] /= norm;
+
     float* samples_float = calloc(sound->num_samples, sizeof(float));
 
     wav_t* filtered_sound = wav_copy(sound);
@@ -552,23 +560,23 @@ int main(){
     for(int i = 0; i < wv->num_samples; i++){
         f_copy[i] = ((short*)wv->data)[i] / (float)MAX_AMPLITUDE_16BIT;
     }
-    uint64_t n = wv->num_samples;
-    double complex* F = fft(f_copy, &n);
+    uint64_t N = wv->num_samples;
+   
+    double complex* F = fft(f_copy, &N);
     
 
     freq = fopen("io/dom_time_before.txt", "w");
-    for(int i = 0; i < n; i++){
+    for(int i = 0; i < N; i++){
         fprintf(freq, "%d;%lf,", i, f_copy[i]);
     }
     fclose(freq);
 
     float fc = 440;
     float fs = wv->header.sample_rate;
-    int N = wv->num_samples;
 
     freq = fopen("io/dom_freq_before.txt", "w");
     time = fopen("io/dom_freq_after.txt", "w");
-    for(int k = 0; k < n; k++){
+    for(int k = 0; k < N; k++){
         int k_devdd = k >= N/2 ? N - k : k;
         float f_curr = (k_devdd*fs/(N*fc)) ; f_curr = f_curr*f_curr;
         fprintf(freq, "%lf;%lf,", k*fs/N, cabs(F[k]));
@@ -577,14 +585,31 @@ int main(){
     }
     fclose(freq), fclose(time);
     free(f_copy);
-    f_copy = ifft(F, &n);
+
+    f_copy = ifft(F, &N);
     
     time = fopen("io/dom_time_after.txt", "w");
-    for(int i = 0; i < n; i++){
+    for(int i = 0; i < N; i++){
         fprintf(time, "%d;%lf,", i, f_copy[i]);
     }
+    fclose(time);
+    time = NULL;
 
-    
+    wav_t* wv_low_filtred = wav_lowpass_filter(wv, fc);
     wav_delete(&wv);
+    
+    printf("antes do open: %p\n", time);
+    time = fopen("io/dom_time_after_covolution.txt", "w");
+    if(time == NULL) printf("arquivo nao abriu\n");
+    
+    short* samples = wv_low_filtred->data;
+    for(int i = 0; i < wv_low_filtred->num_samples; i++){
+        fprintf(time, "%d;%lf,", i, samples[i]/(float)MAX_AMPLITUDE_16BIT);
+    } 
+    printf("escreveu a galera\n");
+    
+    fclose(time);
+    wav_delete(&wv_low_filtred);
+    free(f_copy);
     return 0;
 }
