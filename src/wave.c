@@ -545,51 +545,46 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 }
 
 int main(){
-    float fs = 22050.0f;
-    float freq = 440.0f;
-    float N = 32768.0f;
-    int k = roundf(freq *N / fs);
-    float freq_real = k*fs/N;
+    FILE* freq = NULL, *time = NULL;
+    wav_t* wv = wav_read("tracks/vaqueiro_nao_mono.wav");
     
-    wav_t* la = wav_synthesize(
-        "sin(2*pi*440*t)",
-        0, N/fs, 
-        freq_real, 
-        fs,
-        NULL
-    );
-    uint64_t n = la->num_samples;
-    double* f = malloc(n * sizeof(double));
+    double* f_copy = malloc(sizeof(double) * wv->num_samples);
+    for(int i = 0; i < wv->num_samples; i++){
+        f_copy[i] = ((short*)wv->data)[i] / (float)MAX_AMPLITUDE_16BIT;
+    }
+    uint64_t n = wv->num_samples;
+    double complex* F = fft(f_copy, &n);
     
-    for(int i = 0; i < n; i++){
-        f[i] = ((short*)la->data)[i] /(float) MAX_AMPLITUDE_16BIT;
-    }
-    for(int i = 0; i < 700; i++){
-        printf("f[%d] = %lf,\t", i, f[i]);
-    }
-    double complex* F = fft(f, &n);
 
-    int max = 0, max2 = 0, max3 = 0;
+    freq = fopen("io/dom_time_before.txt", "w");
     for(int i = 0; i < n; i++){
-        if(cabs(F[i]) > cabs(F[max])) max = i;
+        fprintf(freq, "%d;%lf,", i, f_copy[i]);
     }
-    for(int i = 0; i < n; i++){
-        if(i == max) continue;
-        if(cabs(F[i]) > cabs(F[max2])) max2 = i;
+    fclose(freq);
+
+    float fc = 440;
+    float fs = wv->header.sample_rate;
+    int N = wv->num_samples;
+
+    freq = fopen("io/dom_freq_before.txt", "w");
+    time = fopen("io/dom_freq_after.txt", "w");
+    for(int k = 0; k < n; k++){
+        int k_devdd = k >= N/2 ? N - k : k;
+        float f_curr = (k_devdd*fs/(N*fc)) ; f_curr = f_curr*f_curr;
+        fprintf(freq, "%lf;%lf,", k*fs/N, cabs(F[k]));
+        F[k] *= pow(2, -f_curr/2.0f);
+        fprintf(time, "%lf;%lf,", k*fs/N, cabs(F[k]));
     }
-    for(int i = 0; i < n; i++){
-        if(i == max || i == max2) continue;
-        if(cabs(F[i]) > cabs(F[max3])) max3 = i;
-    }
+    fclose(freq), fclose(time);
+    free(f_copy);
+    f_copy = ifft(F, &n);
     
-    printf("\n\n\n\n");
-    for(int i = 0; i < 700; i++){
-        printf("F[%d] = %lf + %lf*i,\t", i, creal(F[i]), cimag(F[i]));
+    time = fopen("io/dom_time_after.txt", "w");
+    for(int i = 0; i < n; i++){
+        fprintf(time, "%d;%lf,", i, f_copy[i]);
     }
-    printf("\n\n\n\n");
+
     
-    printf("max(%d): %lf", max, cabs(F[max]));
-    printf("max2(%d): %lf", max2, cabs(F[max2]));
-    printf("max2(%d): %lf", max2, cabs(F[max3]));
+    wav_delete(&wv);
     return 0;
 }
