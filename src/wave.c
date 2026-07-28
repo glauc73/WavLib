@@ -301,13 +301,13 @@ wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq,
 
     for(int i = 0; i < num_samples; i++){
         int idx = (int) phase;
-        float frac = (float)(phase - idx);
+        float err = (float)(phase - idx);
         
         // Interpolação linear entre os dois pontos vizinhos com o erro,
         // pra mostrar que ponto deveria estar ali se seguisse a periodicidade
         float y0 = samples[idx % T];
         float y1 = samples[(idx + 1) % T];
-        float interp_val = y0 + frac * (y1 - y0);
+        float interp_val = y0 + err * (y1 - y0);
 
         // Aplica a normalização e escala para 16-bit
         int val = (int)((interp_val / max) * (MAX_AMPLITUDE_16BIT * 0.95f));
