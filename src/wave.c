@@ -275,9 +275,9 @@ wav_t* wav_mix_array(wav_t** sounds, int n){
 
 wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, unsigned sample_rate, const char* file_name){
     unsigned rate = sample_rate;
-    unsigned num_samples = time_duration * rate;
+    unsigned num_samples = (unsigned)roundf(time_duration * rate);
     wav_t* sound = wav_new(STD_HEADER(rate, 1, num_samples));
-    int T = sound->header.sample_rate/freq;
+    int T = roundf(rate/freq);
     float yi, t_curr, sum = 0.0f;
 
     float* samples = malloc(T*sizeof(float));
@@ -295,9 +295,26 @@ wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq,
         if(fabsf(samples[i]) > max) max = fabsf(samples[i]);
     }
 
+    double phase = 0.0;
+    double phase_step = (double)T * freq / rate; 
+    //T*freq = rate normalmente, mas por causa do round existe erro. isso que estamos vendo 
+
     for(int i = 0; i < num_samples; i++){
-        int val =((samples[i % T] / max)*(MAX_AMPLITUDE_16BIT * 0.95f));
-        ((short*)sound->data)[i] = (short)round(val); 
+        int idx = (int) phase;
+        float frac = (float)(phase - idx);
+        
+        // Interpolação linear entre os dois pontos vizinhos com o erro,
+        // pra mostrar que ponto deveria estar ali se seguisse a periodicidade
+        float y0 = samples[idx % T];
+        float y1 = samples[(idx + 1) % T];
+        float interp_val = y0 + frac * (y1 - y0);
+
+        // Aplica a normalização e escala para 16-bit
+        int val = (int)((interp_val / max) * (MAX_AMPLITUDE_16BIT * 0.95f));
+        ((short*)sound->data)[i] = (short)val; 
+
+        phase += phase_step; //avança na fase
+        if(phase >= T) phase -= T;  //aplica periodicidade
     }
 
     if(file_name && *file_name) wav_write(sound, file_name);
@@ -528,15 +545,26 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 }
 
 int main(){
-
-    uint64_t n = 32768;
-    wav_t* la = wav_synthesize("sin(2*pi*440*t)", 0, 32768.0f/28160.0f, 440,28160.0f, NULL);
+    float fs = 22050.0f;
+    float freq = 440.0f;
+    float N = 32768.0f;
+    int k = roundf(freq *N / fs);
+    float freq_real = k*fs/N;
+    
+    wav_t* la = wav_synthesize(
+        "sin(2*pi*440*t)",
+        0, N/fs, 
+        freq_real, 
+        fs,
+        NULL
+    );
+    uint64_t n = la->num_samples;
     double* f = malloc(n * sizeof(double));
     
     for(int i = 0; i < n; i++){
         f[i] = ((short*)la->data)[i] /(float) MAX_AMPLITUDE_16BIT;
     }
-    for(int i = 0; i < 600; i++){
+    for(int i = 0; i < 700; i++){
         printf("f[%d] = %lf,\t", i, f[i]);
     }
     double complex* F = fft(f, &n);
@@ -553,8 +581,15 @@ int main(){
         if(i == max || i == max2) continue;
         if(cabs(F[i]) > cabs(F[max3])) max3 = i;
     }
+    
+    printf("\n\n\n\n");
+    for(int i = 0; i < 700; i++){
+        printf("F[%d] = %lf + %lf*i,\t", i, creal(F[i]), cimag(F[i]));
+    }
+    printf("\n\n\n\n");
+    
     printf("max(%d): %lf", max, cabs(F[max]));
     printf("max2(%d): %lf", max2, cabs(F[max2]));
-    printf("max2(%d): %lf", max2, cabs(F[max2]));
+    printf("max2(%d): %lf", max2, cabs(F[max3]));
     return 0;
 }
