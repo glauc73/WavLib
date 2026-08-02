@@ -272,6 +272,66 @@ wav_t* wav_mix_array(wav_t** sounds, int n){
     return mix_sound;
 }
 
+typedef struct{
+    float* an, *bn, a0;
+    float t0, T;
+    int n;
+}FourierSeriesCoefs;
+
+FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int n){
+    FourierSeriesCoefs* fourier = malloc(sizeof(*fourier));
+    *fourier = (FourierSeriesCoefs){
+        .T = T,
+        .n = n,
+        .t0 = t0,
+    };
+    fourier->an = malloc(n*sizeof(float));
+    fourier->bn = malloc(n*sizeof(float));
+
+    int N_integrate = 1000;
+
+    char func_an[strlen(func) + 64];
+    char func_bn[strlen(func) + 64];
+
+    float f = 1.0f/T;
+    fourier->a0 = (1.0f/T) * trapz(func, t0, t0 + T, N_integrate);
+
+    for(int i = 1; i < n; i++){
+        sprintf(func_an, "(%s)*cos(2*pi*%f*%d*t)", func, f, i);
+        sprintf(func_bn, "(%s)*sin(2*pi*%f*%d*t)", func, f, i);
+
+        fourier->an[i] = (2.0f/T) * trapz(func_an, t0, t0 + T, N_integrate);
+        fourier->bn[i] = (2.0f/T) * trapz(func_bn, t0, t0 + T, N_integrate);
+    }
+
+    return fourier;
+}
+
+float FourierSeries(FourierSeriesCoefs* fourier, float x, float freq){
+    float f_x_ = fourier->a0;
+
+    int N = fourier->n;
+    for(int n = 1; n < N; n++){
+        f_x_ += fourier->an[n] * cosf(2*M_PI*freq*n*x);
+        f_x_ += fourier->bn[n] * sinf(2*M_PI*freq*n*x);
+    }
+
+    return f_x_;
+}
+
+wav_t* wav_synthesize_fourier(
+    char* function, 
+    float t0, 
+    float time_duration, 
+    float freq, 
+    unsigned sample_rate,
+    int n_term,
+    const char* file_name)
+{
+    FourierSeriesCoefs* four = ComputeFourierSeriesCoefs(function, t0, T, n_term);   
+
+    for(int i = 0; )
+}
 
 wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, unsigned sample_rate, const char* file_name){
     unsigned rate = sample_rate;
@@ -576,39 +636,15 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 
 int main(){
     wav_t* wv = wav_synthesize(
-        "sin(2*pi*5000*t)",
+        "2sin(220*x) + 2*sin(3*220*x)/3 + 2*sin(5*220*x)/5 + 2*sin(7*220*x)/7 + 2sin(9*220*x)/9 + 2sin(11*220*x)/11 + 2sin(13*220*x)/3",
         0,
-        2,
-        220,
+        5,
+        0.01f,
         22050,
-        "tracks/la.wav"
+        "tracks/chama.wav"
     );
 
-    float fs = wv->header.sample_rate;
-    uint64_t N = wv->num_samples;
-    uint64_t n = N;
-    
-    wav_t* wv_envelope = wav_tremble(wv, 1.0f);
-    double* f = malloc(N*sizeof(double));
-    double *f_env = malloc(N*sizeof(double));
 
-    for(int i = 0; i < N; i++){
-        f[i] = ((short*)wv->data)[i] / (float) MAX_AMPLITUDE_16BIT;
-        f_env[i] = ((short*)wv_envelope->data)[i] / (float) MAX_AMPLITUDE_16BIT;
-    }
-
-    FILE* file = fopen("io/la_freq.txt", "w");
-    FILE* file_env = fopen("io/la_freq_env.txt", "w");
-    double complex* F = fft(f, &N);
-    double complex* F_env = fft(f_env, &n);
-    for(int i = 0; i < N; i++){
-        fprintf(file, "%lf;%lf,", i*fs/(float)N, cabs(F[i]));
-        fprintf(file_env, "%lf;%lf,", i*fs/(float)N, cabs(F_env[i]));
-    }
-    
-    fclose(file), fclose(file_env);
-    free(f), free(f_env);
     wav_delete(&wv);
-    wav_delete(&wv_envelope);
     return 0;
 }

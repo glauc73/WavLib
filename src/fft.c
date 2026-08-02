@@ -1,3 +1,4 @@
+#include <stdint.h>
 #define _USE_MATH_DEFINES
 #include "../include/fft.h"
 
@@ -112,4 +113,5 @@ double* ifft(double complex* F, uint64_t* n){
     *n = new_n;
     return f_flt;
 }
+
 
