@@ -273,47 +273,57 @@ wav_t* wav_mix_array(wav_t** sounds, int n){
 }
 
 typedef struct{
-    float* an, *bn, a0;
+    float* an, *bn;
     float t0, T;
     int n;
 }FourierSeriesCoefs;
 
-FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int n){
+FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int n_harmonics){
     FourierSeriesCoefs* fourier = malloc(sizeof(*fourier));
     *fourier = (FourierSeriesCoefs){
         .T = T,
-        .n = n,
+        .n = n_harmonics,
         .t0 = t0,
     };
-    fourier->an = malloc(n*sizeof(float));
-    fourier->bn = malloc(n*sizeof(float));
+    fourier->an = malloc(n_harmonics * sizeof(float));
+    fourier->bn = malloc(n_harmonics * sizeof(float));
 
-    int N_integrate = 1000;
-
-    char func_an[strlen(func) + 64];
-    char func_bn[strlen(func) + 64];
-
-    float f = 1.0f/T;
-    fourier->a0 = (1.0f/T) * trapz(func, t0, t0 + T, N_integrate);
-
-    for(int i = 1; i < n; i++){
-        sprintf(func_an, "(%s)*cos(2*pi*%f*%d*t)", func, f, i);
-        sprintf(func_bn, "(%s)*sin(2*pi*%f*%d*t)", func, f, i);
-
-        fourier->an[i] = (2.0f/T) * trapz(func_an, t0, t0 + T, N_integrate);
-        fourier->bn[i] = (2.0f/T) * trapz(func_bn, t0, t0 + T, N_integrate);
+    unsigned min_nyquist = 2*n_harmonics;
+    uint64_t M = next_pow2(min_nyquist);
+    
+    double* window_samples = malloc(M*sizeof(double));
+    float pass = T/M;    
+    for(int i = 0; i < M; i++){
+        float yi = eval_X(func, t0 + pass * i);
+        window_samples[i] = isfinite(yi) ? yi : 0.0f;
     }
 
+
+    uint64_t N_fft = M;
+    double complex* ft = fft(window_samples, &N_fft);
+
+    fourier->an[0] = crealf(ft[0]) / M;
+    fourier->bn[0] = 0.0f;
+    for(int i = 1; i < n_harmonics; i++){
+        double complex c_pos = ft[i];
+        double complex c_neg = ft[N_fft - i];
+        fourier->an[i] = (crealf(c_pos) + crealf(c_neg)) / M;
+        fourier->bn[i] = (cimagf(c_neg) - cimagf(c_pos)) / M;
+    }
+
+    free(ft);
+    free(window_samples);
     return fourier;
 }
 
 float FourierSeries(FourierSeriesCoefs* fourier, float x, float freq){
-    float f_x_ = fourier->a0;
+    float f_x_ = fourier->an[0];
 
     int N = fourier->n;
     for(int n = 1; n < N; n++){
-        f_x_ += fourier->an[n] * cosf(2*M_PI*freq*n*x);
-        f_x_ += fourier->bn[n] * sinf(2*M_PI*freq*n*x);
+        float t = x - fourier->t0;
+        f_x_ += fourier->an[n] * cosf(2*M_PI*freq*n*t);
+        f_x_ += fourier->bn[n] * sinf(2*M_PI*freq*n*t);
     }
 
     return f_x_;
@@ -321,65 +331,46 @@ float FourierSeries(FourierSeriesCoefs* fourier, float x, float freq){
 
 wav_t* wav_synthesize_fourier(
     char* function, 
-    float t0, 
+    float t0,
+    float T,
     float time_duration, 
     float freq, 
     unsigned sample_rate,
-    int n_term,
-    const char* file_name)
-{
-    FourierSeriesCoefs* four = ComputeFourierSeriesCoefs(function, t0, T, n_term);   
-
-    for(int i = 0; )
-}
-
-wav_t* wav_synthesize(char* function, float t0, float time_duration, float freq, unsigned sample_rate, const char* file_name){
-    unsigned rate = sample_rate;
-    unsigned num_samples = (unsigned)roundf(time_duration * rate);
-    wav_t* sound = wav_new(STD_HEADER(rate, 1, num_samples));
-    int T = roundf(rate/freq);
-    float yi, t_curr, sum = 0.0f;
-
-    float* samples = malloc(T*sizeof(float));
-    for(int i = 0; i < T; i++){
-        t_curr = t0 + (float) i/ (float) sound->header.sample_rate;
-        yi = eval_X(function, t_curr);
-        samples[i] = isfinite(yi) ? yi : 0.0f;
-        
+    int n_harmonics,
+    const char* file_name
+){
+    
+    unsigned num_samples = roundf(time_duration * sample_rate);
+    wav_t* wv = wav_new(STD_HEADER(sample_rate, 1, num_samples));
+    FourierSeriesCoefs* four = ComputeFourierSeriesCoefs(function, t0, T, n_harmonics);   
+   
+    float* samples = malloc(wv->num_samples * sizeof(float));
+    float max = 0.0f, sum = 0.0f; 
+    for(int i = 0; i < wv->num_samples; i++){
+        float t_curr = t0 + (float)i/sample_rate;
+        samples[i] = FourierSeries(four, t_curr, freq); 
         sum += samples[i];
     }
 
-    float mean = sum / T, max = 0.00001;
-    for(int i = 0; i < T; i++){
+    float mean = sum/wv->num_samples;
+
+    for(int i = 0; i < wv->num_samples; i++){
         samples[i] -= mean;
         if(fabsf(samples[i]) > max) max = fabsf(samples[i]);
     }
 
-    double phase = 0.0;
-    double phase_step = (double)T * freq / rate; 
-    //T*freq = rate normalmente, mas por causa do round existe erro. isso que estamos vendo 
+    float factor = 1.0f;
+    if(max > 0.0f) factor = 0.95f * MAX_AMPLITUDE_16BIT / max;
 
-    for(int i = 0; i < num_samples; i++){
-        int idx = (int) phase;
-        float err = (float)(phase - idx);
-        
-        // Interpolação linear entre os dois pontos vizinhos com o erro,
-        // pra mostrar que ponto deveria estar ali se seguisse a periodicidade
-        float y0 = samples[idx % T];
-        float y1 = samples[(idx + 1) % T];
-        float interp_val = y0 + err * (y1 - y0);
-
-        // Aplica a normalização e escala para 16-bit
-        int val = (int)((interp_val / max) * (MAX_AMPLITUDE_16BIT * 0.95f));
-        ((short*)sound->data)[i] = (short)val; 
-
-        phase += phase_step; //avança na fase
-        if(phase >= T) phase -= T;  //aplica periodicidade
+    for(int i = 0; i < wv->num_samples; i++){
+        ((short*)wv->data)[i] = (short)(samples[i] * factor);
     }
 
-    if(file_name && *file_name) wav_write(sound, file_name);
+    if(file_name && *file_name) wav_write(wv, file_name);
+
+    free(four->an), free(four->bn), free(four);
     free(samples);
-    return sound;
+    return wv;
 }
 
 void wav_decay_exp_inplace(wav_t* sound, float k){
@@ -635,16 +626,18 @@ wav_t* wav_adjust_velocity(wav_t* sound, float p){
 }
 
 int main(){
-    wav_t* wv = wav_synthesize(
-        "2sin(220*x) + 2*sin(3*220*x)/3 + 2*sin(5*220*x)/5 + 2*sin(7*220*x)/7 + 2sin(9*220*x)/9 + 2sin(11*220*x)/11 + 2sin(13*220*x)/3",
-        0,
-        5,
-        0.01f,
-        22050,
+    wav_t* wv = wav_synthesize_fourier(
+        "5sin(x) - sin(5x)",
+        0, 
+        2*M_PI,
+        2,
+        440,
+        44000,
+        100,
         "tracks/chama.wav"
     );
 
-
+    system("python src/wave.py");
     wav_delete(&wv);
     return 0;
 }
