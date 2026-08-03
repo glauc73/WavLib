@@ -35,12 +35,11 @@ wav_t* wav_gaussian_bandpass(wav_t* sound, float fA, float fB, bool inplace){
         return NULL;
     }
 
-    short* samples = target->data;
     short num_channels = target->header.num_channels;
     for(int c = 0; c < num_channels; c++){
         for(int f = radius; f < target->num_frames - radius; f++){
             for(int k = -radius; k <= radius; k++){ 
-                samples_float[f*num_channels + c] += samples[(f + k)*num_channels + c] * kernel[radius + k];
+                samples_float[f*num_channels + c] += target->data[(f + k)*num_channels + c] * kernel[radius + k];
             }
         }
     }
@@ -50,7 +49,7 @@ wav_t* wav_gaussian_bandpass(wav_t* sound, float fA, float fB, bool inplace){
         if(filtered_sample > MAX_AMPLITUDE_16BIT) filtered_sample = MAX_AMPLITUDE_16BIT;
         if(filtered_sample < MIN_AMPLITUDE_16BIT) filtered_sample = MIN_AMPLITUDE_16BIT;
 
-        samples[i] = (short)filtered_sample;
+        target->data[i] = (short)filtered_sample;
     } 
 
     free(kernel);
@@ -68,18 +67,18 @@ wav_t* wav_gaussian_bandreject(wav_t* sound, float fA, float fB, bool inplace){
         return NULL;
     }
 
-    short *samples_target = target->data, *filtered_samples = filtered->data;
+    short *filtered_samples = filtered->data;
     int max_dif = 0;
     for(int i = 0; i < sound->num_samples; i++){
-        int dif = (samples_target[i] - filtered_samples[i]);
+        int dif = (target->data[i] - filtered_samples[i]);
         if(abs(dif) > max_dif) max_dif = abs(dif);
     }
     float factor = 1.0f;
     if(max_dif > MAX_AMPLITUDE_16BIT && max_dif > 0) factor = 0.95f*MAX_AMPLITUDE_16BIT / (float)max_dif; 
 
     for(int i = 0; i < sound->num_samples; i++){
-        int dif = (samples_target[i] - filtered_samples[i]);
-        samples_target[i] = (short)(dif*factor);
+        int dif = (target->data[i] - filtered_samples[i]);
+        target->data[i] = (short)(dif*factor);
     }
     wav_delete(&filtered);
     return target;

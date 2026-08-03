@@ -8,9 +8,12 @@
 #include <string.h>
 #include <stdbool.h>
 #include <math.h>
+#include "wav_error.h"
 
 #define MAX_AMPLITUDE_16BIT (short)0x7fff
 #define MIN_AMPLITUDE_16BIT (short)0x8000
+#define tostr(x) #x
+
 
 #define max(x, y) ((x) > (y) ? (x) : (y))
 #define min(x, y) ((x) < (y) ? (x) : (y))
@@ -51,7 +54,7 @@ typedef struct {
 
 typedef struct {
     WavHeader header;
-    void *data;
+    int16_t *data;
     
     unsigned num_samples;    
     unsigned num_frames;        
@@ -65,5 +68,6 @@ wav_t* wav_copy(const wav_t* sound);
 void wav_delete(wav_t** sound);
 wav_t* wav_to_mono(wav_t* sound, bool inplace);
 wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate, bool inplace);
+
 
 #endif

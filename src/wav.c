@@ -1,12 +1,22 @@
 #include "wav.h"
+#include "wav_error.h"
+#include <stddef.h>
+#include <stdint.h>
 
 wav_t* wav_new(WavHeader h){
     wav_t* sound = malloc(sizeof(wav_t));
-    if(!sound) return NULL;
-
+    if(!sound) {
+        wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory!\n"); 
+        return NULL;
+    }
     sound->header = h;
     sound->data = malloc(h.subchunk2_size);
-    if(!sound->data) return NULL;
+
+    if(!sound->data) {
+        wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory!\n"); 
+        return NULL;
+    }
+
     sound->num_samples = sound->header.subchunk2_size/(sound->header.bits_per_sample / 8);
     sound->num_frames = sound->num_samples / sound->header.num_channels;
     sound->time_duration = (float)sound->num_frames / (float)sound->header.sample_rate;
@@ -17,18 +27,35 @@ wav_t* wav_new(WavHeader h){
 wav_t* wav_read(const char* file_name){
     const char* ext = strrchr(file_name, '.');
     if(!ext || strcmp(ext, ".wav") != 0){
-        printf("Só é possível manipular arquivos com extensão .wav\n");
-        exit(EXIT_FAILURE);
+        wav_set_error(
+            WAV_ERR_INVALID_FORMAT,
+            "ERRO: Só é possível manipular arquivos com extensão .wav\n"
+        );
+        return NULL;
     }
     FILE* f = fopen(file_name, "rb");
-    if(f == NULL){   
-        printf("O arquivo '%s' não existe no diretório atual\n", file_name);
-        exit(EXIT_FAILURE);
+    if(f == NULL){  
+        wav_set_error(
+            WAV_ERR_FILE_NOT_FOUND,
+            "ERRO: O arquivo '%s' não existe no diretório atual\n", file_name
+        );
+        return NULL;
     }
 
     wav_t* sound = malloc(sizeof(wav_t));
 
     fread(&(sound->header), sizeof(WavHeader), 1, f);
+
+    if(sound->header.bits_per_sample != 16){
+        wav_set_error(
+            WAV_ERR_INCOMPATIBLE_HEADER,
+            "ERRO: O arquivo '%s' não é um áudio PCM de 16 bit\n", file_name
+        );
+        fclose(f);
+        wav_delete(&sound);
+        return NULL;
+    }
+
     sound->data = malloc(sound->header.subchunk2_size);
     
     fread(sound->data, 1, sound->header.subchunk2_size, f);
@@ -37,7 +64,8 @@ wav_t* wav_read(const char* file_name){
     sound->num_samples = sound->header.subchunk2_size/(sound->header.bits_per_sample / 8);
     sound->num_frames = sound->num_samples / sound->header.num_channels;
     sound->time_duration = (float)sound->num_frames / (float)sound->header.sample_rate;
-
+   
+    wav_set_error(WAV_SUCCESS, "");
     return sound;
 }
 
@@ -45,8 +73,11 @@ void wav_write(const wav_t* sound, const char* file_name){
     if(sound == NULL) return;
     const char* ext = strrchr(file_name, '.');
     if(!ext || strcmp(ext, ".wav") != 0){
-        printf("Só é possível manipular arquivos com extensão .wav\n");
-        exit(EXIT_FAILURE);
+        wav_set_error(
+            WAV_ERR_INVALID_FORMAT,
+            "ERRO: Só é possível manipular arquivos com extensão .wav\n"
+        );
+        return;
     }
     FILE* f = fopen(file_name, "wb");
 
@@ -57,10 +88,23 @@ void wav_write(const wav_t* sound, const char* file_name){
 }
 
 wav_t* wav_copy(const wav_t* sound){
-    if(!sound) return NULL;
+    if(!sound){
+        wav_set_error(WAV_ERR_NULL_POINTER,  "ERROR: %s is a NULL pointer (%s)", tostr(sound), __FUNCTION__);
+    }
     wav_t* cp = malloc(sizeof(wav_t));
+    if(!cp) {
+        wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory\n");
+        return NULL;
+    }
+
     *cp = *sound;
     cp->data = malloc(cp->header.subchunk2_size);
+    if(!cp->data) {
+        wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory\n");
+        free(cp); 
+        return NULL;
+    }
+
     memcpy(cp->data, sound->data, cp->header.subchunk2_size);
     return cp;
 }
@@ -74,28 +118,35 @@ void wav_delete(wav_t** sound){
 }
 
 wav_t* wav_to_mono(wav_t* sound, bool inplace){
-    if(!sound || !sound->data) return NULL;
+    if(!sound || !sound->data) {
+        wav_set_error(
+            WAV_ERR_NULL_POINTER, 
+            "ERROR [%s]: '%s' is a NULL pointer\n", __FUNCTION__, tostr(sound)
+        );
+        return NULL;
+    }
     if(sound->header.num_channels == 1) return inplace ? sound : wav_copy(sound);
     
     wav_t* target = inplace ? sound : wav_copy(sound);
     if(!target) return NULL;
 
-    short* samples = target->data;
     short num_channels = target->header.num_channels;
+
     for(int i = 0; i < target->num_frames; i++){
         float mean = 0;
+        float val = 0.0f;
         for(int c = 0; c < num_channels; c++){
-            mean += samples[i*num_channels + c];
+            mean += target->data[i*num_channels + c];
         }
         mean /= num_channels;
-        samples[i] = (short)roundf(mean);
+        target->data[i] = mean;
     }
     unsigned num_samples = target->num_frames;
     target->header = STD_HEADER(target->header.sample_rate, 1, num_samples);
     target->num_frames = num_samples;
     target->num_samples = num_samples;
 
-    target->data = realloc(samples, target->header.subchunk2_size);
+    target->data = realloc(target->data, target->header.subchunk2_size);
 
     return target;
 }
@@ -103,7 +154,9 @@ wav_t* wav_to_mono(wav_t* sound, bool inplace){
 wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate, bool inplace){
     if(new_sample_rate >= sound->header.sample_rate) return NULL;
     wav_t* target = inplace ? sound : wav_copy(sound);
-    if(!target) return NULL;
+    if(!target){
+        wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory\n");
+    }
 
     float p = (float) sound->header.sample_rate / (float) new_sample_rate;
 

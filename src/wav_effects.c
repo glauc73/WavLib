@@ -1,68 +1,31 @@
 #include "wav.h"
+#include "wav_effects.h"
 #include "fourier.h"
 
 void wav_adjust_volume(wav_t* sound, float dB){
+    if(!sound) return;
+
     float k = powf(10.0f, dB/20.0f);
-    short* samples = sound->data;
-    short max = abs(samples[0]);
+    float max = 0.0f;
+
     for(int i = 1; i < sound->num_samples; i++){
-        if(abs(samples[i]) > max) max = abs(samples[i]);
+        float abs_val = abs(sound->data[i]);
+        if(abs_val > max) max = abs_val;
     }
+    if(max == 0.0f) return;
+
     float factor = k;
-    if(max * k > MAX_AMPLITUDE_16BIT*0.95f)
-        factor = (MAX_AMPLITUDE_16BIT*0.95f) / max;
+    if(max * k > MAX_AMPLITUDE_16BIT)
+        factor = MAX_AMPLITUDE_16BIT / max;
 
     for(int i = 0; i < sound->num_samples; i++){
-        samples[i] = (short) (samples[i] * factor);
+        sound->data[i] = (short)(sound->data[i] * factor);
     }
 }
 
-wav_t* wav_mix(const wav_t* sound1, const wav_t* sound2){
-    if (!sound1 && !sound2) return NULL;
-    if (!sound1) return wav_copy(sound2);
-    if (!sound2) return wav_copy(sound1);
-
-    if (sound1->header.sample_rate != sound2->header.sample_rate) {
-        printf("Erro [wav_mix]: Taxas de amostragem incompatíveis (%u Hz vs %u Hz).\n", 
-               sound1->header.sample_rate, sound2->header.sample_rate);
-        return NULL;
-    }
-    if (sound1->header.num_channels != sound2->header.num_channels) {
-        printf("Erro [wav_mix]: Número de canais incompatível (%d ch vs %d ch).\n", 
-               sound1->header.num_channels, sound2->header.num_channels);
-        return NULL;
-    }
-    if (sound1->header.bits_per_sample != sound2->header.bits_per_sample) {
-        printf("Erro [wav_mix]: bits por amostra incompatíveis (%d bits vs %d bits).\n", 
-               sound1->header.bits_per_sample, sound2->header.bits_per_sample);
-        return NULL;
-    }
-    const wav_t* greater_sound = sound1->num_samples > sound2->num_samples ? sound1 : sound2;
-    const wav_t* less_sound = sound1->num_samples < sound2->num_samples ? sound1 : sound2;
-    wav_t* mix_sound = wav_copy(greater_sound);
-
-    short* samples1 = sound1->data, *samples2 = sound2->data;
-    
-    int max1 = abs(samples1[0]), max2 = abs(samples2[0]);
-    for(int i = 1; i < sound1->num_samples; i++)
-        if(abs(samples1[i]) > max1) max1 = abs(samples1[i]);
-    for(int i = 1; i < sound2->num_samples; i++)
-        if(abs(samples2[i]) > max2) max2 = abs(samples2[i]);
-        
-    float factor = 1.0f;
-    if(max1 + max2 > MAX_AMPLITUDE_16BIT*0.95f)
-        factor = (MAX_AMPLITUDE_16BIT*0.95f) / (max1 + max2);
-
-    for(int i = 0; i < less_sound->num_samples; i++){
-        int mixed_int = (int)(( - samples1[i] + samples2[i]) * factor);
-        ((short*)mix_sound->data)[i] = (short)mixed_int;
-    }
-
-    for(int i = less_sound->num_samples; i < greater_sound->num_samples; i++){
-        ((short*)mix_sound->data)[i] *= factor;
-    }
-
-    return mix_sound;
+wav_t* wav_mix(wav_t* sound1, wav_t* sound2){
+    wav_t* mix[2] = {sound1, sound2};
+    return wav_mix_array(mix, 2);
 }
 
 wav_t* wav_mix_array(wav_t** sounds, int n){
