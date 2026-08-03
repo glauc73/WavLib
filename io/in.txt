@@ -1,3 +1,0 @@
-sin(2*pi*440*x)
-440
-tracks/la_maior.wav
