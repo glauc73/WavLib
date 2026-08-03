@@ -1,5 +1,5 @@
-#ifndef _MATH_PARSER_H
-#define _MATH_PARSER_H
+#ifndef _EVAL_H_
+#define _EVAL_H_
 #include <ctype.h>
 #include <stdbool.h>
 

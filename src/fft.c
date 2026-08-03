@@ -1,6 +1,6 @@
 #include <stdint.h>
 #define _USE_MATH_DEFINES
-#include "../include/fft.h"
+#include "fft.h"
 
 
 static double complex* fft_(double* f, uint64_t N){

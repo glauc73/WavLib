@@ -1,4 +1,4 @@
-#include "../include/fourier.h"
+#include "fourier.h"
 
 FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int n_harmonics){
     FourierSeriesCoefs* fourier = malloc(sizeof(*fourier));

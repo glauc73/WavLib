@@ -4,8 +4,8 @@
 #include <malloc.h>
 #include <math.h>
 #include <stdint.h>
-#include "../include/fft.h"
-#include "../include/eval.h"
+#include "fft.h"
+#include "eval.h"
 
 
 typedef struct{
