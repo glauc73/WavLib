@@ -16,6 +16,7 @@ typedef struct{
 }WavError_t;
 
 void wav_set_error(wav_error_code_t code, const char* msg, ...);
+void wav_error_init();
 
 extern WavError_t wav_error;
 #endif

@@ -1,70 +1,44 @@
+#include <complex.h>
+#include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 #define _USE_MATH_DEFINES
 #include "fft.h"
 
-
-static double complex* fft_(double* f, uint64_t N){
-    if(N == 1){
-        double complex* r = malloc(sizeof(double complex));
-        r[0] = f[0];
-        return r;
-    }
-    uint64_t M = N/2;
-    double* f_even = malloc(M*sizeof(double));
-    double* f_odd = malloc(M*sizeof(double));
-    for(int i = 0; i < M; i++){
-        f_even[i] = f[2*i];
-        f_odd[i] = f[2*i + 1];
-    }
-
-    double complex* F_even = fft_(f_even, M);
-    double complex* F_odd = fft_(f_odd, M);
-
-    double complex* F = malloc(N * sizeof(double complex));
-    for(int u = 0; u < M; u++){
-        double complex W = cexp(-2.0f*I*M_PI*u / N);
-        F[u] = F_even[u] + W*F_odd[u];
-        F[u + M] = F_even[u] - W*F_odd[u];
-    }
-
-    free(F_even);
-    free(F_odd);
-    free(f_even);
-    free(f_odd);
-
-    return F;
+fft_t* fft_new(size_t N, fft_domain dom){
+    fft_t* FT = malloc(sizeof(fft_t));
+    FT->domain = dom;
+    FT->N = next_pow2(N);
+    FT->data = calloc(FT->N, sizeof(float complex));
+    return FT;
 }
 
-static complex double* ifft_(double complex* f, uint64_t N){
-    if(N == 1){
-        complex double* r = malloc(sizeof(double complex));
-        r[0] = f[0];
-        return r;
+fft_t* fft_init_from_time(float* data, size_t n_data, size_t N){
+    if(n_data > N) N = n_data;
+
+    fft_t* ft = fft_new(N, TIME);
+    if(!ft) return NULL;
+    for(int i = 0; i < n_data; i++){
+        ft->data[i] = data[i];
     }
-    uint64_t M = N/2;
-    double complex* f_even = malloc(M*sizeof(double complex));
-    double complex* f_odd = malloc(M*sizeof(double complex));
-    for(int i = 0; i < M; i++){
-        f_even[i] = f[2*i];
-        f_odd[i] = f[2*i + 1];
-    }
+    return ft;
+}
 
-    complex double* F_even = ifft_(f_even, M);
-    complex double* F_odd = ifft_(f_odd, M);
+fft_t* fft_init_from_freq(float complex* data, size_t n_data, size_t N){
+    if(n_data > N) N = n_data;
 
-    complex double* F = malloc(N * sizeof(double complex));
-    for(int u = 0; u < M; u++){
-        double complex W = cexp(2.0f*I*M_PI*u / N);
-        F[u] = (F_even[u] + W*F_odd[u]);
-        F[u + M] = F_even[u] - W*F_odd[u];
-    }
+    fft_t* ft = fft_new(N, FREQUENCY);
+    if(!ft) return NULL;
+    memcpy(ft->data, data, n_data*sizeof(float complex));
+    return ft;
+}
 
-    free(F_even);
-    free(F_odd);
-    free(f_even);
-    free(f_odd);
 
-    return F;
+void fft_delete(fft_t** FT){
+    if(!FT || !*FT) return;
+    free((*FT)->data);
+    free(*FT);
+    *FT = NULL;
 }
 
 uint64_t next_pow2(uint64_t n){
@@ -81,37 +55,88 @@ uint64_t next_pow2(uint64_t n){
     return n;
 }
 
-double complex* fft(double* f, uint64_t *N){
-    uint64_t new_N = next_pow2(*N);
-    double *buff = calloc(new_N,  sizeof(double));
-    if(!buff) return NULL;
-    memcpy(buff, f, (*N)*sizeof(double));
+int64_t reverse_bit(uint64_t i, int n){
+    short i_bit = 0;
 
-    double complex* F = fft_(buff, new_N);
-    free(buff);
-    *N = new_N;
-    return F;
-}
-
-double* ifft(double complex* F, uint64_t* n){
-    uint64_t new_n = next_pow2(*n);
-    double complex *buff = calloc(new_n, sizeof(double complex));
-    if(!buff) return NULL;
-    memcpy(buff, F, (*n)*sizeof(double complex));
-
-    double complex* f = ifft_(buff, new_n);
-    free(buff);
-
-    double* f_flt = malloc(sizeof(double) * new_n);
-    if(!f_flt) {free(f); return NULL;}
-
-    for(uint64_t i = 0; i < new_n; i++){
-        f_flt[i] = creal(f[i]) / (double)new_n;
+    int64_t inv_bit = 0;
+    for(int64_t j = n - 1; j >= 0; j--){
+        inv_bit |= ((i >> j) & 1ULL) << (n - j - 1);
     }
-    free(f);
-    
-    *n = new_n;
-    return f_flt;
+    return inv_bit;
 }
 
+void fft_run(fft_t* ft){
+    if(!ft || !ft->data || ft->domain == FREQUENCY) return;
+    size_t N = ft->N;
+    
+    float complex* X = calloc(N, sizeof(float complex)); 
+    float complex* x = ft->data;
+    uint8_t log2n = roundf(log2f(N));
 
+    for(int i = 0; i < N; i++){
+        uint64_t rev = reverse_bit(i, log2n);
+        X[rev] = x[i];  
+    }
+    
+    for(size_t M = 2; M <= N; M <<= 1){
+        float complex w = cexpf(-2*M_PI*I/M);
+
+        for(int i = 0; i < N; i += M){
+            float complex W = 1.0;
+
+            for(int j = 0; j < M/2; j++){
+                float complex u = X[i + j];
+                float complex v = X[i + j + M/2];
+
+                X[i + j] = u + v*W;
+                X[i + j + M/2] = u - v*W;
+
+                W *= w;
+            }
+        }
+    }
+    
+    free(ft->data);
+    ft->data = X;
+    ft->domain = FREQUENCY;
+}
+
+void ifft_run(fft_t* ft){
+    if(!ft || !ft->data || ft->domain == TIME) return;
+    size_t N = ft->N;
+    
+    float complex* x = calloc(N, sizeof(float complex)); 
+    float complex* X = ft->data;
+    uint8_t log2n = roundf(log2f(N));
+
+    for(int i = 0; i < N; i++){
+        uint64_t rev = reverse_bit(i, log2n);
+        x[rev] = X[i];  
+    }
+    
+    for(size_t M = 2; M <= N; M <<= 1){
+        float complex w = cexpf(2*M_PI*I/M);
+
+        for(int i = 0; i < N; i += M){
+            float complex W = 1.0;
+
+            for(int j = 0; j < M/2; j++){
+                float complex u = x[i + j];
+                float complex v = x[i + j + M/2];
+
+                x[i + j] = u + v*W;
+                x[i + j + M/2] = u - v*W;
+
+                W *= w;
+            }
+        }
+    }
+
+    free(ft->data);
+    ft->data = x;
+    
+    for(int i = 0; i < N; i++){
+        ft->data[i] = x[i]/N;
+    }
+    ft->domain = TIME;
+}

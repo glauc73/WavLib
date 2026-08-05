@@ -166,16 +166,16 @@ wav_t* wav_decay_exp(wav_t* sound, float k, bool inplace){
     return target;
 }
 
-wav_t* wav_gaussian_window(wav_t* sound, float sigma, float mu, bool inplace){
+wav_t* wav_gaussian_window(wav_t* sound, float stdev, float mean, bool inplace){
     wav_t* target = inplace ? sound : wav_copy(sound);
-    if(!target) return NULL;
+    if(!target || stdev == 0) return NULL;
 
     short* samples = target->data;
     for(int i = 0; i < target->num_frames; i++){
         float t = (float)i / (float)target->header.sample_rate;
         for(int c = 0; c < target->header.num_channels; c++){
             unsigned idx = i*target->header.num_channels + c;
-            float factor = exp(-(t - mu)*(t - mu) / (2*(sigma * sigma)));
+            float factor = exp(-(t - mean)*(t - mean) / (2*(stdev * stdev)));
             samples[idx] = (short)(samples[idx] * factor);
         }
     }   

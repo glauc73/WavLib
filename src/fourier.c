@@ -1,4 +1,6 @@
 #include "fourier.h"
+#include "fft.h"
+#include <complex.h>
 
 FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int n_harmonics){
     FourierSeriesCoefs* fourier = malloc(sizeof(*fourier));
@@ -10,30 +12,28 @@ FourierSeriesCoefs* ComputeFourierSeriesCoefs(char* func, float t0, float T, int
     fourier->an = malloc(n_harmonics * sizeof(float));
     fourier->bn = malloc(n_harmonics * sizeof(float));
 
-    unsigned min_nyquist = 2*n_harmonics;
+    unsigned min_nyquist = 4*n_harmonics;
     uint64_t M = next_pow2(min_nyquist);
     
-    double* window_samples = malloc(M*sizeof(double));
+    float* window_samples = malloc(M*sizeof(float));
     float pass = T/M;    
     for(int i = 0; i < M; i++){
         float yi = eval_X(func, t0 + pass * i);
         window_samples[i] = isfinite(yi) ? yi : 0.0f;
     }
 
-
-    uint64_t N_fft = M;
-    double complex* ft = fft(window_samples, &N_fft);
+    fft_t* ft_window = fft_init_from_time(window_samples, M, M); 
+    fft_run(ft_window);
+    float complex* ft = ft_window->data;
 
     fourier->an[0] = crealf(ft[0]) / M;
     fourier->bn[0] = 0.0f;
     for(int i = 1; i < n_harmonics; i++){
-        double complex c_pos = ft[i];
-        double complex c_neg = ft[N_fft - i];
-        fourier->an[i] = (crealf(c_pos) + crealf(c_neg)) / M;
-        fourier->bn[i] = (cimagf(c_neg) - cimagf(c_pos)) / M;
+        fourier->an[i] = (2.0f/M) * crealf(ft[i]);
+        fourier->bn[i] = (-2.0f/M) * cimagf(ft[i]);
     }
 
-    free(ft);
+    fft_delete(&ft_window);
     free(window_samples);
     return fourier;
 }

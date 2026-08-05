@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 wav_t* wav_new(WavHeader h){
+    wav_error_init();
+
     wav_t* sound = malloc(sizeof(wav_t));
     if(!sound) {
         wav_set_error(WAV_ERR_OUT_OF_MEMORY, "ERROR: Out of Memory!\n"); 
@@ -25,6 +27,8 @@ wav_t* wav_new(WavHeader h){
 
 
 wav_t* wav_read(const char* file_name){
+    wav_error_init();
+
     const char* ext = strrchr(file_name, '.');
     if(!ext || strcmp(ext, ".wav") != 0){
         wav_set_error(
@@ -65,11 +69,12 @@ wav_t* wav_read(const char* file_name){
     sound->num_frames = sound->num_samples / sound->header.num_channels;
     sound->time_duration = (float)sound->num_frames / (float)sound->header.sample_rate;
    
-    wav_set_error(WAV_SUCCESS, "");
     return sound;
 }
 
 void wav_write(const wav_t* sound, const char* file_name){
+    wav_error_init();
+
     if(sound == NULL) return;
     const char* ext = strrchr(file_name, '.');
     if(!ext || strcmp(ext, ".wav") != 0){
@@ -88,8 +93,13 @@ void wav_write(const wav_t* sound, const char* file_name){
 }
 
 wav_t* wav_copy(const wav_t* sound){
+    wav_error_init();
+
     if(!sound){
-        wav_set_error(WAV_ERR_NULL_POINTER,  "ERROR: %s is a NULL pointer (%s)", tostr(sound), __FUNCTION__);
+        wav_set_error(
+            WAV_ERR_NULL_POINTER,
+            "ERROR: %s is a NULL pointer (%s)", tostr(sound), __FUNCTION__
+        );
     }
     wav_t* cp = malloc(sizeof(wav_t));
     if(!cp) {
@@ -118,6 +128,8 @@ void wav_delete(wav_t** sound){
 }
 
 wav_t* wav_to_mono(wav_t* sound, bool inplace){
+    wav_error_init();
+
     if(!sound || !sound->data) {
         wav_set_error(
             WAV_ERR_NULL_POINTER, 
@@ -152,6 +164,8 @@ wav_t* wav_to_mono(wav_t* sound, bool inplace){
 }
 
 wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate, bool inplace){
+    wav_error_init();
+
     if(new_sample_rate >= sound->header.sample_rate) return NULL;
     wav_t* target = inplace ? sound : wav_copy(sound);
     if(!target){

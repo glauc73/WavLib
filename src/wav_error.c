@@ -14,3 +14,8 @@ void wav_set_error(wav_error_code_t code, const char* msg, ...){
     vsnprintf(wav_error.message, sizeof(wav_error.message), msg, args);
     va_end(args);
 }
+
+void wav_error_init(){
+    wav_error.code = WAV_SUCCESS;
+    wav_error.message[0] = '\0';
+}
