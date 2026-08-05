@@ -5,8 +5,9 @@
 #define _USE_MATH_DEFINES
 #include "fft.h"
 
-fft_t* fft_new(size_t N, fft_domain dom){
+fft_t* fft_new(size_t N, fft_domain_t dom){
     fft_t* FT = malloc(sizeof(fft_t));
+    FT->n_samples = N;
     FT->domain = dom;
     FT->N = next_pow2(N);
     FT->data = calloc(FT->N, sizeof(float complex));
@@ -18,9 +19,11 @@ fft_t* fft_init_from_time(float* data, size_t n_data, size_t N){
 
     fft_t* ft = fft_new(N, TIME);
     if(!ft) return NULL;
-    for(int i = 0; i < n_data; i++){
+
+    ft->n_samples = n_data;
+    for(int i = 0; i < n_data; i++)
         ft->data[i] = data[i];
-    }
+
     return ft;
 }
 
@@ -29,6 +32,8 @@ fft_t* fft_init_from_freq(float complex* data, size_t n_data, size_t N){
 
     fft_t* ft = fft_new(N, FREQUENCY);
     if(!ft) return NULL;
+
+    ft->n_samples = n_data;
     memcpy(ft->data, data, n_data*sizeof(float complex));
     return ft;
 }
@@ -71,7 +76,10 @@ void fft_run(fft_t* ft){
     
     float complex* X = calloc(N, sizeof(float complex)); 
     float complex* x = ft->data;
-    uint8_t log2n = roundf(log2f(N));
+
+    uint8_t log2n = 0;
+    while(N > 1) {N >>= 1; log2n++;}
+    N = ft->N;
 
     for(int i = 0; i < N; i++){
         uint64_t rev = reverse_bit(i, log2n);
@@ -107,7 +115,10 @@ void ifft_run(fft_t* ft){
     
     float complex* x = calloc(N, sizeof(float complex)); 
     float complex* X = ft->data;
-    uint8_t log2n = roundf(log2f(N));
+
+    uint8_t log2n = 0;
+    while(N > 1) {N >>= 1; log2n++;}
+    N = ft->N;
 
     for(int i = 0; i < N; i++){
         uint64_t rev = reverse_bit(i, log2n);
@@ -135,7 +146,7 @@ void ifft_run(fft_t* ft){
     free(ft->data);
     ft->data = x;
     
-    for(int i = 0; i < N; i++){
+    for(int i = 0; i < N; i++){ 
         ft->data[i] = x[i]/N;
     }
     ft->domain = TIME;
