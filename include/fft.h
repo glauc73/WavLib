@@ -22,6 +22,8 @@ typedef struct{
 int64_t reverse_bit(uint64_t i, int n);
 uint64_t next_pow2(uint64_t n);
 
+
+float fft_norm_max(fft_t* ft);
 fft_t* fft_new(size_t N, fft_domain_t dom);
 fft_t* fft_init_from_time(float* data, size_t n_data, size_t N);
 fft_t* fft_init_from_freq(float complex* data, size_t n, size_t N);

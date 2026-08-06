@@ -1,4 +1,6 @@
 #include "wav_filters.h"
+#include "fft.h"
+#include "wav.h"
 
 wav_t* wav_gaussian_bandpass(wav_t* sound, float fA, float fB, bool inplace){
     if(!sound) return NULL;
@@ -92,4 +94,7 @@ wav_t* wav_gaussian_highpass(wav_t* sound, float fc, bool inplace){
     return wav_gaussian_bandreject(sound, 0, fc, inplace);
 }
 
+wav_t* wav_covolution(wav_t* snd1, wav_t* snd2){ 
 
+
+}

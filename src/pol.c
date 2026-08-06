@@ -1,38 +1,62 @@
+
 #include "fft.h"
+#include "wav.h"
+#include "wav_filters.h"
+#include "wavlib.h"
 #include <stddef.h>
 #include <stdint.h>
 
 int main(){
+    wav_t* eco = wav_read("tracks/eco.wav");
+    wav_t* sound = wav_read("tracks/vaqueiro_nao.wav");
+   
+    wav_to_mono(sound, true);
+    wav_to_mono(eco, true);
 
-    float A[] = {1, 2};
-    float B[] = {3, -1};
+    wav_gaussian_lowpass(eco, sound->header.sample_rate/2.0f, true);
+    wav_resample(eco, sound->header.sample_rate, true); 
 
-    uint64_t nA = 2;
-    uint64_t nB = 2;
-    uint64_t n = nA + nB - 1;
-
-    fft_t* ft_A = fft_init_from_time(A, nA, n);
-    fft_t* ft_B = fft_init_from_time(B, nA, n);
+    size_t N = eco->num_samples + sound->num_samples - 1;
     
-    fft_run(ft_A);
-    fft_run(ft_B);
+    float* samples_float_eco = malloc(eco->num_samples * sizeof(float));
+    float* samples_float_sound = malloc(sound->num_samples * sizeof(float));
 
-    fft_t* ft_C = fft_new(n, FREQUENCY);
-    
-    for(int i = 0; i < ft_C->N; i++){
-        ft_C->data[i] = ft_A->data[i] * ft_B->data[i];
+    for(int i = 0; i < eco->num_samples; i++) samples_float_eco[i] = (float)eco->data[i] / MAX_AMPLITUDE_16BIT;
+    for(int i = 0; i < sound->num_samples; i++) samples_float_sound[i] = (float) sound->data[i] / MAX_AMPLITUDE_16BIT;
+        
+    fft_t* ft_eco = fft_init_from_time(samples_float_eco, eco->num_samples, N);
+    fft_t* ft_sound = fft_init_from_time(samples_float_sound, sound->num_samples, N);
+
+    fft_run(ft_eco);
+    fft_run(ft_sound);
+
+    fft_t* conv = fft_new(N, FREQUENCY);
+
+    for(int i = 0; i < conv->N; i++)
+        conv->data[i] = ft_eco->data[i] * ft_sound->data[i];
+
+    ifft_run(conv);    
+    fft_norm_max(conv);
+
+    wav_t* wv = wav_new(STD_HEADER(sound->header.sample_rate, 1, ft_sound->n_samples));
+
+    for(int i = 0; i < ft_sound->n_samples; i++){
+        int sample = roundf(crealf(conv->data[i])*MAX_AMPLITUDE_16BIT);
+        if(sample > MAX_AMPLITUDE_16BIT) sample = MAX_AMPLITUDE_16BIT;
+        if(sample < MIN_AMPLITUDE_16BIT) sample = MIN_AMPLITUDE_16BIT;
+        wv->data[i] = sample;
     }
 
-    ifft_run(ft_C);
+    wav_write(wv, "tracks/eco_resampled.wav");
 
-    for(int i = 0; i < ft_C->N; i++){
-        printf("%d : %f\n", i, creal(ft_C->data[i]));
-    }
-
-    printf("domain : %s\n", ft_C->domain == TIME ? "time" : "frequency");
-
-    fft_delete(&ft_A);
-    fft_delete(&ft_B);
-    fft_delete(&ft_C);
+    free(samples_float_sound);
+    free(samples_float_eco);
+    fft_delete(&ft_eco);
+    fft_delete(&ft_sound);
+    fft_delete(&conv);
+    wav_delete(&eco);
+    wav_delete(&wv);
+    wav_delete(&sound);
+    
     return 0;
 }

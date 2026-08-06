@@ -151,3 +151,19 @@ void ifft_run(fft_t* ft){
     }
     ft->domain = TIME;
 }
+
+
+float fft_norm_max(fft_t* ft){
+    if(!ft || !ft->data) return -1;
+
+    float max = 0;
+    for(int i = 0; i < ft->N; i++){
+        if(cabsf(ft->data[i]) > max) max = cabsf(ft->data[i]);
+    }
+    
+    if(max < 1e-12) return 0;
+    for(int i = 0; i < ft->N; i++){
+        ft->data[i] /= max;
+    }
+    return max;
+}

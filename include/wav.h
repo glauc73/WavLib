@@ -68,6 +68,6 @@ wav_t* wav_copy(const wav_t* sound);
 void wav_delete(wav_t** sound);
 wav_t* wav_to_mono(wav_t* sound, bool inplace);
 wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate, bool inplace);
-
+int wav_norm_max(wav_t* sound);
 
 #endif

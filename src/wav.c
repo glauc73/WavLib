@@ -28,7 +28,6 @@ wav_t* wav_new(WavHeader h){
 
 wav_t* wav_read(const char* file_name){
     wav_error_init();
-
     const char* ext = strrchr(file_name, '.');
     if(!ext || strcmp(ext, ".wav") != 0){
         wav_set_error(
@@ -45,10 +44,9 @@ wav_t* wav_read(const char* file_name){
         );
         return NULL;
     }
-
     wav_t* sound = malloc(sizeof(wav_t));
 
-    fread(&(sound->header), sizeof(WavHeader), 1, f);
+    fread(&(sound->header), sizeof(WavHeader) - 8, 1, f);
 
     if(sound->header.bits_per_sample != 16){
         wav_set_error(
@@ -60,15 +58,41 @@ wav_t* wav_read(const char* file_name){
         return NULL;
     }
 
+    char chunk_id[4];
+    uint32_t chunk_size;
+    int found_data = 0;
+
+    while(fread(chunk_id, 1, 4, f) == 4){
+        if(fread(&chunk_size, sizeof(uint32_t), 1, f) != 1) break;
+
+        if(memcmp(chunk_id, "data", 4) == 0){
+            memcpy(sound->header.subchunk2_id, chunk_id, 4);
+            sound->header.subchunk2_size = chunk_size;
+            found_data = 1;
+            break;
+        } else {
+            fseek(f, chunk_size + (chunk_size % 2), SEEK_CUR);
+        }
+    }
+
+    if(!found_data){
+        wav_set_error(
+            WAV_ERR_INVALID_FORMAT,
+            "ERRO: O arquivo '%s' não contém um chunk 'data' válido\n", file_name
+        );
+        fclose(f);
+        wav_delete(&sound);
+        return NULL;
+    }
+
     sound->data = malloc(sound->header.subchunk2_size);
-    
     fread(sound->data, 1, sound->header.subchunk2_size, f);
     fclose(f);
 
     sound->num_samples = sound->header.subchunk2_size/(sound->header.bits_per_sample / 8);
     sound->num_frames = sound->num_samples / sound->header.num_channels;
     sound->time_duration = (float)sound->num_frames / (float)sound->header.sample_rate;
-   
+
     return sound;
 }
 
@@ -193,4 +217,21 @@ wav_t* wav_resample(wav_t* sound, unsigned new_sample_rate, bool inplace){
 
     target->data = realloc(target->data, target->header.subchunk2_size);
     return target;
+}
+
+int wav_norm_max(wav_t* sound){
+    if(!sound || !sound->data) return -1;
+
+    int max = 0;
+    for(int i = 0; i < sound->num_samples; i++){
+        if(abs(sound->data[i]) > max) max = abs(sound->data[i]);
+    }
+    if(max == 0) return 0;
+
+    float factor = MAX_AMPLITUDE_16BIT*0.95f / max;
+
+    for(int i = 0; i < sound->num_samples; i++){
+        sound->data[i] = roundf(factor * sound->data[i]);
+    }
+    return max;
 }
